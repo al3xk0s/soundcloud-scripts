@@ -13,6 +13,10 @@ const withQuery = (url, queryRecord) => {
 
 const getIds = (tracks) => tracks.map(v => v.id);
 
+const getRandomInt = (min, max) => {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
 const delay = (ms) =>
   new Promise((res) => {
     setTimeout(() => res(), ms)
@@ -101,14 +105,17 @@ const createFetches = (userId, token, {
 
   const likeTracks = async (tracks) => {
     const delayMs = 1500;
+    const randomSalt = Math.round(delayMs / 3)
 
-    console.log(`Total time: ${( (tracks.length * (delayMs / 1000)) / 60 ).toFixed(1)} minutes`)
+    const totalTimeMinutes = ( (tracks.length * (delayMs / 1000)) / 60 ).toFixed(1);
+
+    console.log(`Total time: ${totalTimeMinutes} minutes`)
 
     for(const track of tracks) {
       await likeTrack(track);
 
       console.log(`Track ${track} liked`)
-      await delay(delayMs);
+      await delay(delayMs + getRandomInt(-randomSalt, randomSalt));
     }
   };
 
