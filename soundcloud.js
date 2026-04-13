@@ -132,12 +132,35 @@ const createFetches = (userId, token, {
     method: 'PUT'
   });
 
-  const likeTracks = async (tracks, whenContinue = ((_) => {})) => {
+  const getLikesDelaysMs = (tracksCount, longDelayEvery = 15) => {
     const delayMs = 1500;
-    const salt = saltGenerator(3000, 7000);
+    const longDelayMs = 180000;
 
-    const totalDelaySeconds = (tracks.length * (delayMs / 1000)) + (tracks.length * (salt.avg / 1000));
-    const totalTimeMinutes = ( totalDelaySeconds / 60 ).toFixed(1);
+    const salt = saltGenerator(3000, 7000);
+    
+    const longDelaysCount = Math.round(tracksCount / longDelayEvery);
+    const shortDelaysCount = tracksCount - longDelaysCount;
+
+    const totalMs = ( shortDelaysCount * (delayMs + salt.avg) ) + ( longDelaysCount * longDelayMs );
+
+    const getDelay = (i) => {
+        const value = i % longDelayEvery === 0
+            ? longDelayMs
+            : delayMs;
+
+        return value + salt.generate();
+    };
+
+    return {
+        getDelay,
+        totalMs,
+    }
+  };
+
+  const likeTracks = async (tracks, whenContinue = ((_) => {})) => {
+    const likesDelay = getLikesDelaysMs(tracks.length);
+
+    const totalTimeMinutes = ( ( likesDelay.totalMs / 1000 ) / 60 ).toFixed(1);
 
     console.log(`Total time: ${totalTimeMinutes} minutes`);
 
@@ -152,8 +175,8 @@ const createFetches = (userId, token, {
       }
 
       console.log(`Track ${track} liked`);
+      await delay(likesDelay.getDelay(i));  
       i = i + 1;
-      await delay(delayMs + salt.generate());        
     }
   };
 
