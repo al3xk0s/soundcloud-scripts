@@ -1,3 +1,14 @@
+var unliked = [];
+var continueLoads = () => {};
+var client_id = '';
+var app_version = '';
+
+const getErr = (message) => {
+    console.error(message);
+    return Error(message);
+};
+
+
 const withQuery = (url, queryRecord) => {
   const newUrl = new URL(url);
   
@@ -41,9 +52,13 @@ const delay = (ms) =>
   });
 
 const createFetches = (userId, token, {
-  appVersion=1773236899,
-  clientId='nzPYwsAlOGYAuvpzgYO40oV0IVvysQFi'
+  appVersion=app_version,
+  clientId=client_id,
 } = {}) => {
+  if(!appVersion || !clientId) {
+    throw getErr('App Version or Client Id not found! Call parseClient(url);');
+  }
+
   const appFetch = (url, { method = 'GET', body = null } = {}) =>
     fetch(
       url, {
@@ -186,6 +201,62 @@ const getCredentials = async () => {
   return { userId, token };
 };
 
+const createClientParser = () => {
+    const storageKey = '___clientInfo';
+
+    const save = (appVersion, clientId) => {
+        localStorage.setItem(storageKey, JSON.stringify({ appVersion, clientId }));
+    }
+
+    const fromStorage = () => {
+        const saved = localStorage.getItem(storageKey);
+    
+        if(saved == null) return {};
+    
+        try {
+            const { appVersion, clientId } = JSON.parse(saved);
+            return { appVersion, clientId }
+        } catch(e) {
+            return {};
+        }
+    };
+
+    const fromUrl = (url) => {
+        const params = new URLSearchParams(new URL(url).search);
+    
+        appVersion = params.get('app_version');
+        clientId = params.get('client_id');
+
+        return { appVersion, clientId };
+    };
+
+    const parse = (url = '') => {
+        const parser = !!url
+            ? () => fromUrl(url)
+            : () => fromStorage();
+
+        const { appVersion, clientId } = parser();
+
+        if(!appVersion || !clientId) {
+            throw getErr('appVersion or clientId parse failed. Call manualy parseClient(url);');
+        }
+
+        app_version = appVersion;
+        client_id = clientId;
+
+        console.log(`
+appVersion: ${appVersion}
+clientId: ${clientId}
+            `);
+
+        save(appVersion, clientId);
+    };
+
+    return parse;
+};
+
+const parseClient = createClientParser();
+
 const dumpLikes = async () => {
   const { userId, token } = await getCredentials();
   if(!userId || !token) return;
@@ -197,9 +268,6 @@ const dumpLikes = async () => {
     .then(JSON.stringify)
     .then(console.log);
 };
-
-var unliked = [];
-var continueLoads = () => {};
 
 const dumpUnliked = () => {
     console.log(`loadLikes(${JSON.stringify(unliked)});`)
@@ -215,3 +283,5 @@ const loadLikes = async (likes) => {
     console.log('Call this: \ncontinueLoads();')    
   });
 };
+
+parseClient();
