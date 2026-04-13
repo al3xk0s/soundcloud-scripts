@@ -15,7 +15,25 @@ const getIds = (tracks) => tracks.map(v => v.id);
 
 const getRandomInt = (min, max) => {
   return Math.floor(Math.random() * (max - min + 1)) + min;
-}
+};
+
+const saltGenerator = (min, max) => {
+    avg = Math.round((min + max) / 2);
+
+    const generate = () => Math.round(getRandomInt(min, max));
+
+    return {
+        avg,
+        generate,
+    };
+};
+
+const getDelayMs = (ms, mul = 0.33) => {
+    const saltMs = Math.round(ms * mul);
+    const { generate } = saltGenerator(-saltMs, saltMs);
+
+    return ms + generate();
+};
 
 const delay = (ms) =>
   new Promise((res) => {
@@ -39,58 +57,54 @@ const createFetches = (userId, token, {
       method,
       mode: "cors",
       credentials: "include"
-    }).then(v => v.json());
+    }).then(res => {
+        if(res.status > 299) {
+            throw Error(res.status);
+        }
 
-  const fetchLikes = ({  
+        return res.json();
+    });
+
+  const mapLikes = v => ({ tracks: v.collection.map(e => e.track), nextRef: v.next_href });
+
+  const firstFetchLikes = ({  
     limit=100,
-    offset=0,  
   } = {}) =>
     appFetch(
       withQuery(
         `https://api-v2.soundcloud.com/users/${userId}/track_likes`, {
           client_id: clientId,
-          limit: limit,
-          offset: offset,
+          limit: limit,          
           linked_partitioning: 1,
           app_version: appVersion,
           app_locale: 'en',
       })
-    ).then(v => v.collection.map(e => e.track));
+    ).then(mapLikes);
 
-  const fetchLikesAuto = async (targetLength) => {
+  const fetchLikes = async () => {
     const allTracks = [];
-    const limit = 100; // Максимально допустимый лимит за один запрос
+    const limit = 50; // Максимально допустимый лимит за один запрос
+    const delayMs = 1500;
 
-    const delayMs = 3000;
+    let nextRef = null;
 
-    let offset = 0;
+    while (true) {
+      const fetchPromise = nextRef == null
+          ? firstFetchLikes({limit})
+          : appFetch(nextRef).then(mapLikes);
 
-    while (allTracks.length < targetLength) {
-      // Вычисляем, сколько еще нужно добрать (чтобы не взять лишнего в последнем запросе)
-      const remaining = targetLength - allTracks.length;
-      const currentLimit = Math.min(limit, remaining);
+      const { tracks, nextRef: newNextRef } = await fetchPromise;
 
-      await delay(delayMs);
+      const isEqualsRef = nextRef === newNextRef;
+      nextRef = newNextRef;
+      
+      tracks.forEach(v => allTracks.push(v));
 
-      try {
-        // Вызываем вашу исходную функцию
-        const tracks = await fetchLikes({ limit: currentLimit, offset });
+      console.log(`Tracks pack received ${tracks.length}`);      
+      await delay(getDelayMs(delayMs));
 
-        if (tracks.length === 0) {
-          break; // Больше треков нет, выходим из цикла
-        }
-
-        allTracks.push(...tracks);
-        offset += tracks.length;
-
-        console.log(`Fetched ${allTracks.length} / ${targetLength}`);
-      } catch (error) {
-        console.error("Error fetching likes:", error);
-        break; 
-      }
+      if(nextRef == null || isEqualsRef) return allTracks;
     }
-
-    return allTracks.slice(0, targetLength);
   };
 
   const likeTrack = (trackId) => appFetch(
@@ -103,25 +117,35 @@ const createFetches = (userId, token, {
     method: 'PUT'
   });
 
-  const likeTracks = async (tracks) => {
+  const likeTracks = async (tracks, whenContinue = ((_) => {})) => {
     const delayMs = 1500;
-    const randomSalt = Math.round(delayMs / 3)
+    const salt = saltGenerator(3000, 7000);
 
-    const totalTimeMinutes = ( (tracks.length * (delayMs / 1000)) / 60 ).toFixed(1);
+    const totalDelaySeconds = (tracks.length * (delayMs / 1000)) + (tracks.length * (salt.avg / 1000));
+    const totalTimeMinutes = ( totalDelaySeconds / 60 ).toFixed(1);
 
-    console.log(`Total time: ${totalTimeMinutes} minutes`)
+    console.log(`Total time: ${totalTimeMinutes} minutes`);
 
-    for(const track of tracks) {
-      await likeTrack(track);
+    let i = 0;
+    for (const track of tracks) {
+      try {
+        await likeTrack(track);
+      } catch(e) {
+        console.log('Continue:');
+        whenContinue(tracks.slice(i));
+        return;
+      }
 
-      console.log(`Track ${track} liked`)
-      await delay(delayMs + getRandomInt(-randomSalt, randomSalt));
+      console.log(`Track ${track} liked`);
+      i = i + 1;
+      await delay(delayMs + salt.generate());        
     }
   };
 
-  const likeTracksReverse = (tracks) => likeTracks(tracks.slice(0).reverse());
+  const likeTracksReverse = (tracks, whenContinue = ((_) => {})) =>
+    likeTracks(tracks.slice(0).reverse(), (tracks) => whenContinue(tracks.reverse()));
 
-  return { fetchLikesAuto, fetchLikes, likeTracks, likeTracksReverse };
+  return { fetchLikes, likeTracks, likeTracksReverse };
 };
 
 const parseLikeRequest = (curlRequest) => {
@@ -162,24 +186,32 @@ const getCredentials = async () => {
   return { userId, token };
 };
 
-const dumpLikes = async (targetCount = undefined) => {
+const dumpLikes = async () => {
   const { userId, token } = await getCredentials();
   if(!userId || !token) return;
 
   const v = createFetches(userId, token);
 
-  const fetchPromise = targetCount != null
-    ? v.fetchLikesAuto(targetCount)
-    : v.fetchLikes();
-
-  fetchPromise
+  v.fetchLikes()
     .then(getIds)
-    .then(console.log)
+    .then(JSON.stringify)
+    .then(console.log);
+};
+
+var unliked = [];
+var continueLoads = () => {};
+
+const dumpUnliked = () => {
+    console.log(`loadLikes(${JSON.stringify(unliked)});`)
 };
 
 const loadLikes = async (likes) => {
   const { userId, token } = await getCredentials();
   const v = createFetches(userId, token);
-
-  v.likeTracksReverse(likes);
+  
+  v.likeTracksReverse(likes, (otherTracks) => {
+    unliked = otherTracks.slice(0);
+    continueLoads = () => loadLikes(otherTracks);
+    console.log('Call this: \ncontinueLoads();')    
+  });
 };
