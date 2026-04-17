@@ -1,13 +1,41 @@
-var unliked = [];
-var continueLoads = () => {};
 var client_id = '';
 var app_version = '';
 
 const getErr = (message) => {
-    console.error(message);
+    console.error(message);    
     return Error(message);
 };
 
+const unliked = (() => {
+  const key = '__unliked';
+  let values = null;
+
+  const setValues = (tracks) => {
+    values = tracks.slice(0);
+    localStorage.setItem(key, JSON.stringify(tracks));
+  };
+
+  const getValues = () => {
+    if(values != null) return values;
+
+    const rawUnliked = localStorage.getItem(key);
+
+    if(!rawUnliked) return [];
+
+    try {
+      values = JSON.parse(rawUnliked);
+      return values;
+    } catch {
+      getErr('Parse unliked failed');
+      return [];
+    }
+  };
+
+  return {
+    getValues,
+    setValues,
+  }
+})();
 
 const withQuery = (url, queryRecord) => {
   const newUrl = new URL(url);
@@ -46,10 +74,13 @@ const getDelayMs = (ms, mul = 0.33) => {
     return ms + generate();
 };
 
-const delay = (ms) =>
-  new Promise((res) => {
+const delay = (ms) => {
+  console.debug(`Delay by ${ms / 1000} seconds`);
+
+  return new Promise((res) => {
     setTimeout(() => res(), ms)
   });
+}
 
 const createFetches = (userId, token, {
   appVersion=app_version,
@@ -132,33 +163,50 @@ const createFetches = (userId, token, {
     method: 'PUT'
   });
 
-  const getLikesDelaysMs = (tracksCount, longDelayEvery = 15) => {
-    const delayMs = 1500;
-    const longDelayMs = 180000;
+  const delayGenerator = ({delayMs, salt, count}) => {
+    const totalMs = count * (delayMs + salt.avg);
 
-    const salt = saltGenerator(3000, 7000);
-    
-    const longDelaysCount = Math.round(tracksCount / longDelayEvery);
-    const shortDelaysCount = tracksCount - longDelaysCount;
+    const generate = () => delayMs + salt.generate();
 
-    const totalMs = ( shortDelaysCount * (delayMs + salt.avg) ) + ( longDelaysCount * longDelayMs );
+    return {
+      totalMs,
+      generate,
+    }
+  };
 
-    const getDelay = (i) => {
-        const value = i % longDelayEvery === 0
-            ? longDelayMs
-            : delayMs;
+  const likesDelayGenerator = (tracksCount, longDelayEvery = 15) => {
+    const longDelaysCount = Math.round(tracksCount / longDelayEvery);    
 
-        return value + salt.generate();
+    const shortDelay = delayGenerator({
+      delayMs: 60 * 1000,
+      salt: saltGenerator(20 * 1000, 60 * 1000),
+      count: tracksCount - longDelaysCount,
+    });
+
+    const longDelay = delayGenerator({
+      delayMs: 40 * 60 * 1000,
+      salt: saltGenerator(5 * 60 * 1000, 15 * 60 * 1000),
+      count: longDelaysCount,
+    });
+
+    const totalMs = shortDelay.totalMs + longDelay.totalMs;
+
+    const generate = (i) => {        
+        const delay = i % longDelayEvery === 0
+          ? longDelay
+          : shortDelay;
+
+        return delay.generate();
     };
 
     return {
-        getDelay,
+        generate,
         totalMs,
     }
   };
 
   const likeTracks = async (tracks, whenContinue = ((_) => {})) => {
-    const likesDelay = getLikesDelaysMs(tracks.length);
+    const likesDelay = likesDelayGenerator(tracks.length);
 
     const totalTimeMinutes = ( ( likesDelay.totalMs / 1000 ) / 60 ).toFixed(1);
 
@@ -175,7 +223,7 @@ const createFetches = (userId, token, {
       }
 
       console.log(`Track ${track} liked`);
-      await delay(likesDelay.getDelay(i));  
+      await delay(likesDelay.generate(i));  
       i = i + 1;
     }
   };
@@ -292,19 +340,21 @@ const dumpLikes = async () => {
     .then(console.log);
 };
 
-const dumpUnliked = () => {
-    console.log(`loadLikes(${JSON.stringify(unliked)});`)
-};
-
 const loadLikes = async (likes) => {
   const { userId, token } = await getCredentials();
   const v = createFetches(userId, token);
   
   v.likeTracksReverse(likes, (otherTracks) => {
-    unliked = otherTracks.slice(0);
-    continueLoads = () => loadLikes(otherTracks);
+    unliked.setValues(otherTracks.slice(0));
     console.log('Call this: \ncontinueLoads();')    
   });
 };
+
+const dumpUnliked = () => {
+    console.log(`loadLikes(${JSON.stringify(unliked.getValues())});`)
+};
+
+const continueLoads = () =>
+  loadLikes(unliked.getValues());
 
 parseClient();
