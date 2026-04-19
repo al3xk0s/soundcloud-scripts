@@ -207,7 +207,11 @@ const createFetches = (userId, token, {
     }
   };
 
-  const likeTracks = async (tracks, whenContinue = ((_) => {})) => {
+  const likeTracks = async (
+    tracks, {
+    whenContinue = ((tracks) => {}),
+    onIteration = ((i, tracks) => {}),
+  } = {}) => {
     const likesDelay = likesDelayGenerator(tracks.length);
 
     const totalTimeMinutes = ( ( likesDelay.totalMs / 1000 ) / 60 ).toFixed(1);
@@ -217,6 +221,7 @@ const createFetches = (userId, token, {
     let i = 0;
     for (const track of tracks) {
       try {
+        onIteration(i, tracks);
         await likeTrack(track);
       } catch(e) {
         console.log('Continue:');
@@ -230,8 +235,16 @@ const createFetches = (userId, token, {
     }
   };
 
-  const likeTracksReverse = (tracks, whenContinue = ((_) => {})) =>
-    likeTracks(tracks.slice(0).reverse(), (tracks) => whenContinue(tracks.reverse()));
+  const likeTracksReverse = (
+    tracks, {
+    whenContinue = ((tracks) => {}),
+    onIteration = ((i, tracks) => {}),
+  }) =>
+    likeTracks(
+      tracks.slice(0).reverse(), {
+      whenContinue: (tracks) => whenContinue(tracks.slice(0).reverse()),
+      onIteration: (i, tracks) => onIteration(i, tracks.slice(0).reverse()),
+    });
 
   return { fetchLikes, likeTracks, likeTracksReverse };
 };
@@ -346,9 +359,15 @@ const loadLikes = async (likes) => {
   const { userId, token } = await getCredentials();
   const v = createFetches(userId, token);
   
-  v.likeTracksReverse(likes, (otherTracks) => {
-    unliked.setValues(otherTracks.slice(0));
-    console.log('Call this: \ncontinueLoads();')    
+  v.likeTracksReverse(
+    likes, {
+    whenContinue: (otherTracks) => {
+      unliked.setValues(otherTracks.slice(0));
+      console.log('Call this: \ncontinueLoads();')    
+    },
+    onIteration: (i, tracks) => {
+      unliked.setValues(tracks.slice(i));
+    },
   });
 };
 
