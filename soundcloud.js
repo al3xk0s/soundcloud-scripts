@@ -175,7 +175,7 @@ const createFetches = (userId, token, {
   };
 
   const likesDelayGenerator = (tracksCount, longDelayEvery = 15) => {
-    const longDelaysCount = Math.round(tracksCount / longDelayEvery);    
+    const longDelaysCount = Math.max(0, Math.round(tracksCount / longDelayEvery) - 1);    
 
     const shortDelay = delayGenerator({
       delayMs: 60 * 1000,
@@ -191,8 +191,10 @@ const createFetches = (userId, token, {
 
     const totalMs = shortDelay.totalMs + longDelay.totalMs;
 
-    const generate = (i) => {        
-        const delay = i % longDelayEvery === 0
+    const generate = (i) => {
+        const isLongDelay = i !== 0 && i % longDelayEvery === 0;
+
+        const delay = isLongDelay
           ? longDelay
           : shortDelay;
 
