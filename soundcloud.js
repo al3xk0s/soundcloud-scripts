@@ -222,7 +222,7 @@ const createFetches = (userId, token, {
         return;
       }
 
-      console.log(`Track ${track} liked`);
+      console.log(`Track ${track} liked (${i + 1}/${tracks.length})`);
       await delay(likesDelay.generate(i));  
       i = i + 1;
     }
